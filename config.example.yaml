@@ -1,0 +1,35 @@
+# --- Telegram API credentials ---
+# Получить на https://my.telegram.org/apps
+# (создай приложение один раз, скопируй сюда)
+api_id: 0000000
+api_hash: "REPLACE_WITH_YOUR_API_HASH"
+
+# --- Список чатов для сбора ---
+# target может быть:
+#   - @username публичного чата ("@somechat")
+#   - числовой id для приватного чата (получить через `python harvester.py discover`)
+# key — короткое имя, под ним будет файл data/<key>.json
+# forum — авто-определится по факту, если не указать
+chats:
+  # Пример: приватный форум
+  - key: example-forum
+    target: -1001234567890
+    enabled: false
+
+  # Пример: публичный чат
+  - key: example-public
+    target: "@some_public_chat"
+    enabled: false
+
+# --- Ротация ---
+# Если файл data/<chat>.json вырастет больше rotation_size_mb,
+# при следующем `archive` основной файл обнуляется,
+# а копия уезжает в archive/<iso-week>/
+rotation_size_mb: 50
+
+# --- Опции забора ---
+# Сколько сообщений максимум за один заход на топик/чат
+max_pull_per_chat: 50000
+
+# --- Расписание (для systemd timer на сервере) ---
+schedule_hint: "0 3,9,15 * * *  + 30 20 * * *"

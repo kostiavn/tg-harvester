@@ -1,0 +1,70 @@
+# --- СЕКРЕТЫ — НИКОГДА НЕ КОММИТИТЬ ---
+
+# Реальный конфиг с API credentials
+config.yaml
+
+# Telethon session — полный доступ к Telegram-аккаунту
+session/
+*.session
+*.session-journal
+
+# --- ДАННЫЕ ПОЛЬЗОВАТЕЛЕЙ — этически нельзя публиковать ---
+
+# Архивы переписок
+data/
+archive/
+
+# State с last_message_id (может раскрывать активность)
+state.json
+state.json.tmp
+
+# Логи
+logs/
+*.log
+
+# --- PYTHON ---
+
+# Виртуальное окружение
+venv/
+env/
+.venv/
+
+# Кэши
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# --- OS / IDE ---
+
+# Windows
+Thumbs.db
+desktop.ini
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# Linux
+*~
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# JetBrains
+.idea/
+*.iml
+
+# --- ВРЕМЕННЫЕ ФАЙЛЫ ---
+*.tmp
+*.bak
+*.swp
+*.swo
