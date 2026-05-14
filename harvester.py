@@ -566,14 +566,31 @@ async def cmd_listen(cfg):
 
 # ---------- TG client wrapper ----------
 
+def _build_proxy_tuple(cfg):
+    """Возвращает tuple для Telethon proxy= или None, если прокси не настроен."""
+    p = cfg.get("proxy")
+    if not p:
+        return None
+    import python_socks
+    ptype_map = {
+        "socks5": python_socks.ProxyType.SOCKS5,
+        "socks4": python_socks.ProxyType.SOCKS4,
+        "http": python_socks.ProxyType.HTTP,
+    }
+    ptype = ptype_map.get(p.get("type", "socks5").lower(), python_socks.ProxyType.SOCKS5)
+    return (ptype, p["host"], int(p["port"]))
+
+
 class build_client:
     def __init__(self, cfg):
         self.cfg = cfg
         self.client = None
 
     async def __aenter__(self):
+        proxy = _build_proxy_tuple(self.cfg)
         self.client = TelegramClient(str(SESSION_PATH),
-                                     self.cfg["api_id"], self.cfg["api_hash"])
+                                     self.cfg["api_id"], self.cfg["api_hash"],
+                                     proxy=proxy)
         await self.client.start()
         return self.client
 
@@ -582,7 +599,11 @@ class build_client:
 
 
 async def cmd_auth(cfg):
-    client = TelegramClient(str(SESSION_PATH), cfg["api_id"], cfg["api_hash"])
+    proxy = _build_proxy_tuple(cfg)
+    if proxy:
+        log.info(f"использую прокси {proxy[0]} {proxy[1]}:{proxy[2]}")
+    client = TelegramClient(str(SESSION_PATH), cfg["api_id"], cfg["api_hash"],
+                            proxy=proxy)
     await client.start()
     me = await client.get_me()
     log.info(f"авторизован: {me.first_name} (@{me.username}) id={me.id}")
