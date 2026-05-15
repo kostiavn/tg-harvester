@@ -445,8 +445,9 @@ async def cmd_discover(cfg, search=None):
 # ---------- archive ----------
 
 async def cmd_archive(cfg, client=None):
-    iso_week = datetime.now(timezone.utc).strftime("%G-W%V")
-    arc_name = f"tg-archive-{iso_week}.tar.gz"
+    # Имя по дате — каждый день новый
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    arc_name = f"tg-archive-{today}.tar.gz"
     arc_path = ARCHIVE_DIR / arc_name
 
     files = list(DATA_DIR.glob("*.json"))
@@ -459,24 +460,63 @@ async def cmd_archive(cfg, client=None):
             tar.add(f, arcname=f.name)
     log.info(f"архив: {arc_path}")
 
-    async def _send(c):
+    async def _send_and_cleanup(c):
         me = await c.get_me()
+
+        # Сначала удаляем старые архивы из Saved Messages (любые предыдущие
+        # сообщения с файлом начинающимся на "tg-archive-")
+        deleted_count = 0
+        try:
+            async for old_msg in c.iter_messages(me, limit=100):
+                if old_msg.document is None:
+                    continue
+                old_name = None
+                for attr in old_msg.document.attributes:
+                    if hasattr(attr, "file_name"):
+                        old_name = attr.file_name
+                        break
+                if old_name and old_name.startswith("tg-archive-") \
+                        and old_name.endswith(".tar.gz") \
+                        and old_name != arc_name:
+                    try:
+                        await old_msg.delete()
+                        deleted_count += 1
+                    except Exception as e:
+                        log.warning(f"не удалить {old_name}: {e}")
+            if deleted_count:
+                log.info(f"удалено старых архивов в Saved: {deleted_count}")
+        except Exception as e:
+            log.warning(f"очистка Saved fail: {e}")
+
+        # Отправляем свежий
         await c.send_file(me, arc_path,
-                          caption=f"📦 TG archive {iso_week} | "
+                          caption=f"📦 TG archive {today} | "
                                   f"{len(files)} файлов | "
-                                  f"{arc_path.stat().st_size//1024} KB")
+                                  f"{arc_path.stat().st_size//1024} KB"
+                                  + (f" | удалено старых: {deleted_count}" if deleted_count else ""))
 
     if client is not None:
-        await _send(client)
+        await _send_and_cleanup(client)
     else:
         async with build_client(cfg) as c:
-            await _send(c)
+            await _send_and_cleanup(c)
 
+    # Локальная ротация: удаляем локальные tar.gz старше 3 дней
+    cutoff = datetime.now().timestamp() - 3 * 86400
+    for old_arc in ARCHIVE_DIR.glob("tg-archive-*.tar.gz"):
+        if old_arc.stat().st_mtime < cutoff and old_arc.name != arc_name:
+            try:
+                old_arc.unlink()
+                log.info(f"локально удалён старый архив: {old_arc.name}")
+            except Exception as e:
+                log.warning(f"не удалить {old_arc.name}: {e}")
+
+    # Ротация data/*.json если разрослись
     rotation_mb = cfg.get("rotation_size_mb", 50)
     for f in files:
         size_mb = f.stat().st_size / 1024 / 1024
         if size_mb > rotation_mb:
-            week = ARCHIVE_DIR / iso_week
+            week = ARCHIVE_DIR / today
             week.mkdir(exist_ok=True)
             shutil.copy2(f, week / f.name)
             with open(f, encoding="utf-8") as fh:
@@ -568,8 +608,54 @@ async def cmd_listen(cfg):
                     else:
                         lines.append(f"  {k}: {s.get('total_messages', 0)} msgs")
                 await event.reply("\n".join(lines))
-            elif cmd == "/help":
-                await event.reply("/harvest /dump <key> <h> /archive /status")
+            elif cmd in ("/info", "/help"):
+                info_text = (
+                    "🤖 *TG Harvester — справка*\n"
+                    "\n"
+                    "Что это: собирает сообщения из 6 чатов и складывает в JSON-файлы,\n"
+                    "чтобы можно было кидать их Claude как контекст.\n"
+                    "\n"
+                    "📋 *Команды:*\n"
+                    "\n"
+                    "▪️ `/status`\n"
+                    "   Сводка по всем чатам: сколько сообщений собрано на текущий момент.\n"
+                    "   Полезно посмотреть что система живая и накапливает данные.\n"
+                    "\n"
+                    "▪️ `/harvest`\n"
+                    "   Запустить забор новых сообщений *прямо сейчас*, не дожидаясь\n"
+                    "   расписания. Качает только то что появилось с прошлого захода.\n"
+                    "   Занимает 10-60 секунд.\n"
+                    "\n"
+                    "▪️ `/archive`\n"
+                    "   Упаковать *все* JSON-файлы в tar.gz и прислать сюда.\n"
+                    "   Старые архивы в Saved Messages удаляются автоматически,\n"
+                    "   остаётся только свежий.\n"
+                    "\n"
+                    "▪️ `/dump <chat_key> <hours>`\n"
+                    "   Точечная выгрузка одного чата за последние N часов.\n"
+                    "   Полезно когда хочешь посмотреть свежак конкретного чата\n"
+                    "   без всех остальных.\n"
+                    "   Примеры:\n"
+                    "      /dump remnaflood 24    — ремнафлуд за сутки\n"
+                    "      /dump prizrak-talk 6   — призрак за 6 часов\n"
+                    "      /dump koala-clash 48   — коала за 2 суток\n"
+                    "\n"
+                    "📂 *Доступные чаты (chat_key):*\n"
+                    "   `remnaflood` — форум (2 топика)\n"
+                    "   `prizrak-talk`\n"
+                    "   `koala-clash`\n"
+                    "   `flclashx`\n"
+                    "   `rabbit-hole-chat`\n"
+                    "   `rabbit-hole-channel`\n"
+                    "\n"
+                    "🕐 *Автозапуски:*\n"
+                    "   harvest — каждые 6 часов (03/09/15/20:30 UTC)\n"
+                    "   archive — ежедневно в 20:50 UTC (23:50 МСК)\n"
+                    "\n"
+                    "💡 *Совет:* `/status` это самая безопасная команда —\n"
+                    "вызови если не уверен жив ли harvester."
+                )
+                await event.reply(info_text)
         except Exception as e:
             log.exception("listener err")
             await event.reply(f"❌ {e}")
