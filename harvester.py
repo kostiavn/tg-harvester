@@ -387,17 +387,30 @@ async def harvest_chat(client, chat_cfg, state, max_pull):
     return await harvest_plain(client, chat_cfg, state, entity, max_pull)
 
 
-async def cmd_harvest(cfg):
+async def cmd_harvest(cfg, only=None, exclude=None):
+    """Забрать новые сообщения.
+    only:    список chat_key — забирать ТОЛЬКО эти чаты
+    exclude: список chat_key — забирать всё КРОМЕ этих
+    Если оба None — забирать всё что enabled.
+    """
     max_pull = cfg.get("max_pull_per_chat", 5000)
+    only_set = set(only) if only else None
+    excl_set = set(exclude) if exclude else set()
+
     async with build_client(cfg) as client:
         state = load_state()
         for cc in cfg["chats"]:
             if not cc.get("enabled", True):
                 continue
+            key = cc["key"]
+            if only_set is not None and key not in only_set:
+                continue
+            if key in excl_set:
+                continue
             try:
                 await harvest_chat(client, cc, state, max_pull)
             except Exception as e:
-                log.exception(f"[{cc['key']}]: {e}")
+                log.exception(f"[{key}]: {e}")
             await asyncio.sleep(2)
 
 
@@ -726,7 +739,15 @@ def main():
         q = sys.argv[2] if len(sys.argv) > 2 else None
         asyncio.run(cmd_discover(cfg, q))
     elif action == "harvest":
-        asyncio.run(cmd_harvest(cfg))
+        only = None
+        exclude = None
+        # Парсим --only key1,key2  или  --except key3,key4
+        for i, arg in enumerate(sys.argv[2:], start=2):
+            if arg == "--only" and i + 1 < len(sys.argv):
+                only = [k.strip() for k in sys.argv[i + 1].split(",") if k.strip()]
+            elif arg == "--except" and i + 1 < len(sys.argv):
+                exclude = [k.strip() for k in sys.argv[i + 1].split(",") if k.strip()]
+        asyncio.run(cmd_harvest(cfg, only=only, exclude=exclude))
     elif action == "archive":
         asyncio.run(cmd_archive(cfg))
     elif action == "dump":
