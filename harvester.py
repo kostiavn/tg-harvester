@@ -585,6 +585,19 @@ async def cmd_listen(cfg):
     me = await client.get_me()
     log.info(f"listener: {me.first_name}")
 
+    # Отправляем себе в Saved Messages уведомление о старте
+    try:
+        startup_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        msk_time = (datetime.now(timezone.utc) + timedelta(hours=3)).strftime("%H:%M МСК")
+        await client.send_message(
+            me,
+            f"🟢 *harvester started*\n"
+            f"📅 {startup_time} ({msk_time})\n"
+            f"🤖 Готов принимать команды. Напиши /info для справки."
+        )
+    except Exception as e:
+        log.warning(f"не удалось отправить startup ping: {e}")
+
     @client.on(events.NewMessage(from_users=me.id))
     async def handler(event):
         text = (event.message.message or "").strip()
