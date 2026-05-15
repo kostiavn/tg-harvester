@@ -444,7 +444,7 @@ async def cmd_discover(cfg, search=None):
 
 # ---------- archive ----------
 
-async def cmd_archive(cfg):
+async def cmd_archive(cfg, client=None):
     iso_week = datetime.now(timezone.utc).strftime("%G-W%V")
     arc_name = f"tg-archive-{iso_week}.tar.gz"
     arc_path = ARCHIVE_DIR / arc_name
@@ -459,12 +459,18 @@ async def cmd_archive(cfg):
             tar.add(f, arcname=f.name)
     log.info(f"архив: {arc_path}")
 
-    async with build_client(cfg) as client:
-        me = await client.get_me()
-        await client.send_file(me, arc_path,
-                               caption=f"📦 TG archive {iso_week} | "
-                                       f"{len(files)} файлов | "
-                                       f"{arc_path.stat().st_size//1024} KB")
+    async def _send(c):
+        me = await c.get_me()
+        await c.send_file(me, arc_path,
+                          caption=f"📦 TG archive {iso_week} | "
+                                  f"{len(files)} файлов | "
+                                  f"{arc_path.stat().st_size//1024} KB")
+
+    if client is not None:
+        await _send(client)
+    else:
+        async with build_client(cfg) as c:
+            await _send(c)
 
     rotation_mb = cfg.get("rotation_size_mb", 50)
     for f in files:
@@ -483,17 +489,18 @@ async def cmd_archive(cfg):
 
 # ---------- dump ----------
 
-async def cmd_dump(cfg, chat_key, hours):
+async def cmd_dump(cfg, chat_key, hours, client=None):
     chat_cfg = next((c for c in cfg["chats"] if c["key"] == chat_key), None)
     if not chat_cfg:
         print(f"{chat_key} не найден в config.yaml")
         return
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-    async with build_client(cfg) as client:
-        entity = await client.get_entity(chat_cfg["target"])
+
+    async def _run(c):
+        entity = await c.get_entity(chat_cfg["target"])
         sender_cache = {}
         msgs = []
-        async for msg in client.iter_messages(entity):
+        async for msg in c.iter_messages(entity):
             if msg.date < cutoff:
                 break
             d = await message_to_dict(msg, sender_cache)
@@ -506,9 +513,15 @@ async def cmd_dump(cfg, chat_key, hours):
             json.dump({"name": title, "messages": msgs}, f,
                       ensure_ascii=False, indent=1)
         log.info(f"dump: {out} ({len(msgs)})")
-        me = await client.get_me()
-        await client.send_file(me, out,
-                               caption=f"🔍 {chat_key} за {hours}ч ({len(msgs)})")
+        me = await c.get_me()
+        await c.send_file(me, out,
+                          caption=f"🔍 {chat_key} за {hours}ч ({len(msgs)})")
+
+    if client is not None:
+        await _run(client)
+    else:
+        async with build_client(cfg) as c:
+            await _run(c)
 
 
 # ---------- listen ----------
@@ -539,10 +552,10 @@ async def cmd_listen(cfg):
             elif cmd == "/dump" and len(parts) >= 3:
                 ck, hs = parts[1], int(re.sub(r"[^\d]", "", parts[2]) or "24")
                 await event.reply(f"⏳ dump {ck} {hs}ч")
-                await cmd_dump(cfg, ck, hs)
+                await cmd_dump(cfg, ck, hs, client=client)
             elif cmd == "/archive":
                 await event.reply("⏳ архив...")
-                await cmd_archive(cfg)
+                await cmd_archive(cfg, client=client)
             elif cmd == "/status":
                 state = load_state()
                 lines = ["📊 status:"]
